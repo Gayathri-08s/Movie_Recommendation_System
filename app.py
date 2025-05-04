@@ -1,50 +1,49 @@
-import streamlit as st 
+import streamlit as st
 import pickle
-import pandas as pd 
+import pandas as pd
 import requests
 import os
 
-# --- Function to download similarity.pkl from Google Drive ---
+# --- Google Drive Download Helpers ---
 def download_file_from_google_drive(file_id, destination):
     URL = "https://drive.google.com/uc?export=download"
-
     session = requests.Session()
     response = session.get(URL, params={'id': file_id}, stream=True)
-
-    def get_confirm_token(response):
-        for key, value in response.cookies.items():
-            if key.startswith('download_warning'):
-                return value
-        return None
-
     token = get_confirm_token(response)
     if token:
         params = {'id': file_id, 'confirm': token}
         response = session.get(URL, params=params, stream=True)
+    save_response_content(response, destination)
 
+def get_confirm_token(response):
+    for key, value in response.cookies.items():
+        if key.startswith('download_warning'):
+            return value
+    return None
+
+def save_response_content(response, destination):
+    CHUNK_SIZE = 32768
     with open(destination, "wb") as f:
-        for chunk in response.iter_content(32768):
+        for chunk in response.iter_content(CHUNK_SIZE):
             if chunk:
                 f.write(chunk)
 
-# --- Download similarity.pkl only if not already present ---
-SIMILARITY_FILE_ID = '1u_GB-EfOVKdXx3hmU_CZfNPO8QcD1BLa'  # ← Replace with actual file ID
+# --- Download similarity.pkl if not present ---
+SIMILARITY_FILE_ID = '1u_GB-EfOVKdXx3hmU_CZfNPO8QcD1BLa'  # Replace with your actual ID
 SIMILARITY_FILE_PATH = 'similarity.pkl'
 
 if not os.path.exists(SIMILARITY_FILE_PATH):
     download_file_from_google_drive(SIMILARITY_FILE_ID, SIMILARITY_FILE_PATH)
 
-# --- Load movie data ---
+# --- Load data ---
 movies_dict = pickle.load(open('movie_dict.pkl', 'rb'))
 movies = pd.DataFrame(movies_dict)
-
 similarity = pickle.load(open(SIMILARITY_FILE_PATH, 'rb'))
 
-# --- TMDB API Call ---
+# --- TMDB API Function ---
 def fetch_movie_details(movie_id):
-    response = requests.get(
-        f'https://api.themoviedb.org/3/movie/{movie_id}?api_key=916ed8867edce6717dda3cffd517274c&language=en-US'
-    )
+    url = f'https://api.themoviedb.org/3/movie/{movie_id}?api_key=916ed8867edce6717dda3cffd517274c&language=en-US'
+    response = requests.get(url)
     data = response.json()
     return {
         'poster_url': "https://image.tmdb.org/t/p/w500/" + data.get('poster_path', ''),
@@ -62,24 +61,25 @@ def fetch_movie_details(movie_id):
         'rating': f"{data.get('vote_average', 'N/A')} ({data.get('vote_count', 0)} votes)"
     }
 
-# --- Recommendation Logic ---
+# --- Recommendation Function ---
 def recommend(movie):
     movie_index = movies[movies['title'] == movie].index[0]
     distances = similarity[movie_index]
-    movies_list = sorted(list(enumerate(distances)), reverse=True, key=lambda x: x[1])[1:6]
+    movie_list = sorted(list(enumerate(distances)), reverse=True, key=lambda x: x[1])[1:6]
 
     recommended_details = []
-    for i in movies_list:
+    for i in movie_list:
         movie_id = movies.iloc[i[0]].movie_id
         recommended_details.append(fetch_movie_details(movie_id))
     return recommended_details
 
 # --- Streamlit UI ---
-st.title('Movie Recommender System')
+st.title('🎬 Movie Recommender System')
 
 selected_movie_name = st.selectbox(
     'Select a movie you like:',
-    movies['title'].values)
+    movies['title'].values
+)
 
 if st.button('Recommend'):
     details_list = recommend(selected_movie_name)
